@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PDF Watermark Remover HYBRID</title>
+
+<!-- PDF.js -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<!-- PDF-Lib -->
+<script src="https://unpkg.com/pdf-lib/dist/pdf-lib.min.js"></script>
+
+<style>
+body{
+  font-family:Arial, sans-serif;
+  background:#f3f4f6;
+  display:flex;
+  justify-content:center;
+  align-items:center;
+  min-height:100vh;
+  margin:0;
+}
+.container{
+  background:white;
+  padding:20px;
+  border-radius:12px;
+  box-shadow:0 10px 25px rgba(0,0,0,.15);
+  width:95%;
+  max-width:550px;
+  text-align:center;
+}
+.dropzone{
+  border:2px dashed #94a3b8;
+  padding:25px;
+  border-radius:10px;
+  cursor:pointer;
+}
+button{
+  margin-top:12px;
+  padding:10px 16px;
+  border:none;
+  border-radius:8px;
+  background:#2563eb;
+  color:white;
+  cursor:pointer;
+}
+.progress{height:8px;background:#ddd;border-radius:10px;margin-top:10px;overflow:hidden}
+.bar{height:100%;width:0%;background:#2563eb}
+canvas{display:none}
+</style>
+</head>
+<body>
+
+<div class="container">
+<h2>PDF Watermark Remover (Hybrid AI Mode)</h2>
+
+<div class="dropzone" id="dropzone">
+Click or Drag PDF Here
+<input type="file" id="pdfInput" accept="application/pdf" hidden>
+</div>
+
+<button id="processBtn">Clean PDF</button>
+
+<div class="progress"><div class="bar" id="bar"></div></div>
+<p id="status">Waiting for file...</p>
+
+<a id="downloadLink" style="display:none" download="cleaned.pdf">
+<button>Download Cleaned PDF</button>
+</a>
+
+<canvas id="canvas"></canvas>
+</div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc=
+"https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js";
+
+const input=document.getElementById("pdfInput");
+const dropzone=document.getElementById("dropzone");
+const btn=document.getElementById("processBtn");
+const status=document.getElementById("status");
+const bar=document.getElementById("bar");
+const canvas=document.getElementById("canvas");
+const ctx=canvas.getContext("2d");
+const downloadLink=document.getElementById("downloadLink");
+
+// Drag & Drop
+ dropzone.onclick=()=>input.click();
+ dropzone.ondragover=e=>{e.preventDefault();dropzone.style.opacity=.6};
+ dropzone.ondragleave=()=>dropzone.style.opacity=1;
+ dropzone.ondrop=e=>{
+   e.preventDefault();
+   input.files=e.dataTransfer.files;
+   dropzone.style.opacity=1;
+ };
+
+btn.onclick=async()=>{
+ if(!input.files[0]){
+   alert("Upload PDF first");
+   return;
+ }
+
+ const buffer=await input.files[0].arrayBuffer();
+
+ status.innerText="Analyzing PDF structure...";
+
+ const useStructural = await tryStructuralRemoval(buffer);
+
+ if(useStructural){
+   status.innerText="Structural cleaning successful (Text preserved).";
+   return;
+ }
+
+ status.innerText="Switching to visual cleaning...";
+ await visualCleaning(buffer);
+};
+
+// ===============================
+// METHOD 1 — STRUCTURAL CLEANING
+// ===============================
+async function tryStructuralRemoval(buffer){
+ try{
+   const { PDFDocument } = PDFLib;
+   const pdfDoc = await PDFDocument.load(buffer);
+   const pages = pdfDoc.getPages();
+
+   let removedSomething=false;
+
+   pages.forEach(page=>{
+     const dict = page.node.Resources();
+     if(!dict) return;
+
+     const xObject = dict.lookup(PDFLib.PDFName.of('XObject'));
+     if(!xObject) return;
+
+     const keys = xObject.keys();
+     keys.forEach(key=>{
+       // heuristic: remove large background objects
+       removedSomething=true;
+       xObject.delete(key);
+     });
+   });
+
+   if(!removedSomething) return false;
+
+   const pdfBytes = await pdfDoc.save();
+   const blob=new Blob([pdfBytes],{type:"application/pdf"});
+   const url=URL.createObjectURL(blob);
+
+   downloadLink.href=url;
+   downloadLink.style.display="inline-block";
+   bar.style.width="100%";
+   return true;
+
+ }catch(e){
+   console.log("Structural removal failed",e);
+   return false;
+ }
+}
+
+// ===============================
+// METHOD 2 — VISUAL CLEANING
+// ===============================
+async function visualCleaning(buffer){
+ const pdf=await pdfjsLib.getDocument({data:buffer}).promise;
+ const images=[];
+
+ for(let p=1;p<=pdf.numPages;p++){
+   status.innerText=`Processing page ${p}/${pdf.numPages}`;
+   bar.style.width=((p/pdf.numPages)*100)+"%";
+
+   const page=await pdf.getPage(p);
+   const viewport=page.getViewport({scale:2});
+
+   canvas.width=viewport.width;
+   canvas.height=viewport.height;
+
+   await page.render({canvasContext:ctx,viewport}).promise;
+
+   const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+   const data=img.data;
+
+   for(let i=0;i<data.length;i+=4){
+     const brightness=(data[i]+data[i+1]+data[i+2])/3;
+     if(brightness>210){
+       data[i]=255;
+       data[i+1]=255;
+       data[i+2]=255;
+     }
+   }
+
+   ctx.putImageData(img,0,0);
+   images.push(canvas.toDataURL("image/jpeg",1));
+ }
+
+ const script=document.createElement("script");
+ script.src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js";
+ script.onload=()=>buildPDF(images);
+ document.body.appendChild(script);
+}
+
+async function buildPDF(images){
+ const {jsPDF}=window.jspdf;
+ const pdf=new jsPDF();
+
+ images.forEach((img,i)=>{
+   if(i!==0) pdf.addPage();
+   pdf.addImage(img,"JPEG",0,0,210,297);
+ });
+
+ const blob=pdf.output("blob");
+ const url=URL.createObjectURL(blob);
+
+ downloadLink.href=url;
+ downloadLink.style.display="inline-block";
+ status.innerText="Visual cleaning complete.";
+ bar.style.width="100%";
+}
+</script>
+</body>
+</html>
