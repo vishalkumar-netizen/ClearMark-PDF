@@ -56,9 +56,7 @@ The application automatically chooses the best method for each uploaded file.
 
 ## 🌐 Live Demo
 
-Enable GitHub Pages to run the app for free:
-
-https://YOUR-USERNAME.github.io/YOUR-REPOSITORY/
+https://vishalkumar-netizen.github.io/ClearMark-PDF/
 
 ---
 
