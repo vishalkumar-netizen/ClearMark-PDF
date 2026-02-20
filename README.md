@@ -2,7 +2,7 @@
 
 ClearMark PDF is a free, browser-based PDF watermark and logo remover that intelligently selects the best cleaning method automatically.
 
-The tool runs entirely in your browser with no uploads, no login, and no server processing.
+The tool runs entirely in your browser with no login and no server processing.
 
 ---
 
